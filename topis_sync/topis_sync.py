@@ -427,6 +427,12 @@ def run(a):
                 files, _ = download_attachments(entry, raw_dir)
             except Exception as ex:  # noqa: BLE001
                 problems.append(f"[{nid}] 첨부를 받지 못함: {ex}")
+        originals = []                                      # 올릴 원본: 받은 첨부 전부(.hwp 포함)
+        for f in files:
+            if os.path.dirname(os.path.abspath(f)) != os.path.abspath(raw_dir):
+                os.makedirs(raw_dir, exist_ok=True)
+                shutil.copyfile(f, os.path.join(raw_dir, os.path.basename(f)))
+            originals.append(os.path.basename(f))
         skipped = [f for f in files if f.lower().endswith((".hwp",))]
         if skipped:
             problems.append(f"[{nid}] .hwp 첨부는 읽지 못함(.hwpx·pdf·xlsx만 지원): " + ", ".join(os.path.basename(x) for x in skipped))
@@ -467,7 +473,8 @@ def run(a):
         if cancel:
             problems.append(f"[{nid}] 취소·철회 공지: 같은 행사의 원래 공지가 있으면 그쪽도 내려야 함 — {title[:40]}")
         led[nid] = dict(title=title, event_start=s.isoformat(), event_end=e.isoformat(), update_date=update, status=status, ver=ver,
-                        rows=len(df), active=len(act), hold=len(hold), canceled=cancel, undated=undated)
+                        rows=len(df), active=len(act), hold=len(hold), canceled=cancel, undated=undated,
+                        originals=originals, url=g("url"))
         new += not ok_before; upd += bool(ok_before); canc += cancel
     cleanup(data, led, today, a.past_days, log)
     merged(data, led, log)
@@ -475,7 +482,7 @@ def run(a):
     log += [f"새 공지 {new}건 / 수정 {upd}건 / 취소 {canc}건 · 기간이 지나 건너뜀 {skipped_old}건 · 아직 이르다 보류 {waiting}건 · 버스 아님 {nobus}건"]
     log += ["확인할 것:"] + (["  " + p for p in problems] or ["  없음"])
     if getattr(a, "repo_dir", None):
-        log += publish(a.repo_dir, a.repo_subdir, os.path.join(data, "merged"))
+        log += publish(a.repo_dir, a.repo_subdir, os.path.join(data, "merged"), led)
     gh = [l for l in log if l.startswith("깃허브")]
     n_ok = sum(1 for e in led.values() if e.get("status") == "처리됨" and not e.get("canceled"))
     now = dt.datetime.now().strftime("%H:%M")
@@ -544,18 +551,35 @@ def merged(data, led, log):
         log.append(f"active 중 확인 필요 {int((act['확인상태'] == '확인 필요').sum())}행, 순번 빈 행 {int((act['정류소순번'] == '').sum())}행")
 
 
-NOTICE_README = """# 서울 버스 우회·무정차 공지 (v1 CSV)
+NOTICE_README = """# 🚌 서울 버스 우회·무정차 공지 데이터
 
-서울시 TOPIS 공지(버스안내)를 자동 수집해 만든 표준 CSV입니다. 3시간마다 갱신됩니다.
+서울시 TOPIS 공지(버스안내)를 자동으로 모아 만든 **표준 CSV**입니다. 지도·길찾기용으로 쓰도록 정리했습니다.
 
-- `topis_v1_active.csv` — **지도·길찾기에 쓰는 파일.** 1행 = (노선, 정류소) 1개. 이 파일만 쓰면 됩니다.
-- `topis_v1_hold.csv` — 자동 검사를 통과하지 못해 뺀 행(노선 데이터에 없는 정류소 등). 참고용.
-- `topis_v1_우회경로.csv` — 우회 경로 지점(순서대로). 참고용.
+## 파일
 
-이 파일들은 **그 시점에 유효한 공지 전체**입니다(지난 행사는 하루 뒤 빠지고, 앞으로 7일치까지 포함). 새 파일을 받으면 이전 것을 버리고 통째로 교체하세요.
-열 이름으로 읽고, 정류소ID는 5자리 문자열로 다루세요(CSV는 UTF-8 BOM, 엑셀로 열어 저장하지 마세요).
+| 파일 | 설명 |
+|---|---|
+| **[`topis_v1_active.csv`](topis_v1_active.csv)** | ✅ **지도·길찾기에 쓰는 파일.** 1행 = (노선, 정류소) 1개. 이것만 쓰면 됩니다 |
+| [`topis_v1_hold.csv`](topis_v1_hold.csv) | 자동 검사를 통과하지 못해 뺀 행 (참고용) |
+| [`topis_v1_우회경로.csv`](topis_v1_우회경로.csv) | 우회 경로 지점, 순서대로 (참고용) |
+| [`originals/`](originals) | 공지 **첨부 원본**(PDF 등)과 공지 목록 `index.csv` (우회 지도 제작용) |
+| [`팀원용_사용방법.md`](팀원용_사용방법.md) | 열 설명·받는 법·주의사항 전체 |
+| [`fetch_notices.py`](fetch_notices.py) | 받아서 검사해 주는 스크립트 |
 
-출처: 서울특별시 TOPIS 공지사항 / 서울 열린데이터광장 (공공누리 제2유형: 출처표시, 상업적 이용 금지)
+## 이것만 기억하세요
+
+파일은 **그 시점에 유효한 공지 전체**입니다. 지난 행사는 하루 뒤 빠지고, 앞으로 7일 안에 시작하는 공지까지 들어옵니다.
+
+> [!IMPORTANT]
+> **엑셀로 열어 저장하지 마세요.** 정류소ID 앞의 0이 지워집니다. 읽을 때는 정류소ID를 5자리 **문자열**로 다루세요. (파일은 UTF-8 BOM)
+
+## 갱신
+
+수집 PC가 켜져 있는 동안 주기적으로 갱신하고, 바뀐 내용이 있을 때만 이 폴더에 올라옵니다.
+
+## 출처
+
+서울특별시 TOPIS 공지사항 / 서울 열린데이터광장 — 공공누리 제2유형: **출처표시, 상업적 이용 금지**
 """
 
 
@@ -564,7 +588,74 @@ def _git(repo, *args):
     return r.returncode, (r.stdout + r.stderr).strip()
 
 
-def publish(repo, subdir, merged_dir):
+def notice_kind(title):
+    """제목으로 공지 종류: 우회 / 무정차 / 우회+무정차 / 기타"""
+    d, m = "우회" in title, "무정차" in title
+    return "우회+무정차" if d and m else "우회" if d else "무정차" if m else "기타"
+
+
+def publish_originals(dest, data, led):
+    """지금 유효한(처리됨·취소 아님) 공지의 첨부 원본을 originals/<공지ID>/ 에 복사하고, 공지 목록 index.csv 를 만든다.
+    기간이 지나 장부에서 빠진 공지의 폴더는 지운다."""
+    odir = os.path.join(dest, "originals")
+    os.makedirs(odir, exist_ok=True)
+    rows, keep = [], set()
+    for nid, e in sorted(led.items(), key=lambda kv: int(kv[0])):
+        if e.get("status") != "처리됨" or e.get("canceled"):
+            continue
+        keep.add(nid)
+        names = []
+        found = e.get("originals")
+        if found is None:                                   # 이 기능이 생기기 전에 처리한 공지: 저장해 둔 raw 폴더에서 찾는다
+            found = sorted(os.path.basename(x) for x in glob.glob(os.path.join(data, "raw", nid, f"{nid}_*")))
+        for n in found:
+            src = os.path.join(data, "raw", nid, n)
+            if os.path.exists(src):
+                os.makedirs(os.path.join(odir, nid), exist_ok=True)
+                shutil.copyfile(src, os.path.join(odir, nid, n))
+                names.append(n)
+        rows.append({"공지ID": nid, "종류": notice_kind(e.get("title", "")), "제목": e.get("title", ""),
+                     "행사시작": e.get("event_start", ""), "행사종료": e.get("event_end", ""),
+                     "원문링크": e.get("url", ""), "첨부파일": " | ".join(f"{nid}/{n}" for n in names)})
+    for d in os.listdir(odir):
+        if os.path.isdir(os.path.join(odir, d)) and d not in keep:
+            shutil.rmtree(os.path.join(odir, d))
+    pd.DataFrame(rows, columns=["공지ID", "종류", "제목", "행사시작", "행사종료", "원문링크", "첨부파일"]).to_csv(
+        os.path.join(odir, "index.csv"), index=False, encoding="utf-8-sig")
+    open(os.path.join(odir, "README.md"), "w", encoding="utf-8", newline="\n").write(ORIGINALS_README)
+    return len(rows), sum(1 for r in rows if r["첨부파일"])
+
+
+ORIGINALS_README = """# 📎 공지 원본 첨부 (originals)
+
+`topis_v1_*.csv` 에 반영된 공지의 **TOPIS 첨부 원본**(PDF·hwpx·xlsx·hwp)입니다. 노선별 우회 지도(HTML) 등을 만들 때 쓰세요.
+
+## 구성
+
+| 위치 | 내용 |
+|---|---|
+| **`index.csv`** | 공지 목록 — 공지ID, **종류**, 제목, 행사 기간, 원문 링크, 첨부 파일 경로 |
+| `<공지ID>/` | 그 공지의 첨부 파일 |
+
+## 종류 보는 법
+
+| 종류 | 뜻 | 우회 지도 |
+|---|---|---|
+| `우회` | 임시 우회 안내 | 필요 |
+| `우회+무정차` | 우회와 무정차가 함께 있는 공지 | 필요 |
+| `무정차` | 정류소 무정차 통과 안내 | 보통 필요 없음 |
+| `기타` | 제목에 '우회'·'무정차'가 없음 | 확인 필요 |
+
+종류는 공지 **제목의 글자**로 나눈 것입니다.
+
+> [!NOTE]
+> - **첨부가 없는 공지**(글로만 적힌 공지)는 폴더가 없고, `index.csv` 의 첨부파일 칸이 비어 있습니다.
+> - `.hwp` 첨부는 원본은 올라오지만, 우리 쪽에서 내용을 읽지 못해 CSV에는 반영되지 않았을 수 있습니다.
+> - 지난 행사의 파일은 하루 뒤 자동으로 지워집니다. 필요하면 받아서 따로 보관하세요.
+"""
+
+
+def publish(repo, subdir, merged_dir, led=None):
     """합친 csv 3개를 git 저장소 폴더에 복사하고, 바뀐 것이 있을 때만 commit + push. 실패해도 예외를 던지지 않고 로그만 돌려준다."""
     try:
         if not os.path.isdir(os.path.join(repo, ".git")):
@@ -578,6 +669,16 @@ def publish(repo, subdir, merged_dir):
         for n in OUT_NAMES.values():
             shutil.copyfile(os.path.join(merged_dir, n), os.path.join(dest, n))
         open(os.path.join(dest, "README.md"), "w", encoding="utf-8", newline="\n").write(NOTICE_README)
+        if led is not None:
+            try:
+                n_all, n_att = publish_originals(dest, os.path.dirname(os.path.abspath(merged_dir)), led)
+                lines.append(f"원본 첨부: 공지 {n_all}건 중 첨부 있는 {n_att}건을 originals/ 에 복사")
+            except Exception as ex:  # noqa: BLE001
+                lines.append(f"원본 첨부 복사 중 오류(CSV는 그대로 올림): {ex}")
+        docs = os.path.join(os.path.dirname(os.path.abspath(__file__)), "team_docs")      # 팀원용 설명서·받기 스크립트가 있으면 함께 올림
+        if os.path.isdir(docs):
+            for n in os.listdir(docs):
+                shutil.copyfile(os.path.join(docs, n), os.path.join(dest, n))
         _git(repo, "add", "--", subdir)
         rc, out = _git(repo, "status", "--porcelain", "--", subdir)
         if not out.strip():
