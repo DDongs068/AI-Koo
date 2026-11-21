@@ -1,0 +1,129 @@
+<!doctype html>
+<html lang="ko">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#f6f8fc" />
+    <meta name="description" content="Route B는 버스 우회 때 내 정류장의 승차 가능 여부와 대체 승차 위치를 쉽게 확인하는 서비스입니다." />
+    <title>Route B | 길이 바뀌어도, 답은 있다</title>
+    <link rel="stylesheet" href="./styles.css?v=20261121-engine" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="anonymous" />
+    <script defer src="https://cdn.jsdelivr.net/npm/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin="anonymous"></script>
+    <script defer src="./data/routes.js"></script>
+    <script defer src="./data/catalog.js"></script>
+    <script defer src="./data/march-catalog.js"></script>
+    <script defer src="./data/route-geometry.js"></script>
+    <script defer src="./live-stop-resolver.js?v=20261121-name-search"></script>
+    <script defer src="./journey-match.js?v=20261121-event-map"></script>
+    <script defer src="./engine-route.js?v=20261121-engine"></script>
+    <script defer src="./app.js?v=20261121-engine"></script>
+    <script defer src="./map.js?v=20261121-engine"></script>
+  </head>
+  <body>
+    <div class="site-shell">
+      <header class="site-header">
+        <a class="brand" href="#top" aria-label="Route B 홈">
+          <span class="brand-mark" aria-hidden="true"><span>B</span></span>
+          <span class="brand-name">Route B<span class="brand-period">.</span></span>
+        </a>
+        <nav class="top-nav" aria-label="주요 메뉴">
+          <a href="#check">정류장 확인</a>
+          <a href="#how-it-works">이용 방법</a>
+          <a href="#about">서비스 소개</a>
+        </nav>
+        <span class="header-badge"><span class="badge-dot"></span>행사 기록 + 현재 버스 조회</span>
+      </header>
+
+      <main id="top">
+        <section class="checker" id="check" aria-labelledby="checker-title">
+          <div class="section-heading">
+            <div>
+              <p class="section-kicker">CHECK YOUR BUS</p>
+              <h2 id="checker-title">내 버스, 어디서 타야 할까요?</h2>
+            </div>
+            <div class="demo-note"><span class="demo-note-icon">i</span> 지난 행사 기록입니다. 현재 운행 정보가 아닙니다.</div>
+          </div>
+
+          <div class="checker-grid">
+            <div class="search-panel">
+              <div class="tabs" role="tablist" aria-label="조회 방식">
+                <button class="tab active" id="station-tab" type="button" role="tab" aria-selected="true" aria-controls="station-panel">정류장 확인</button>
+                <button class="tab" id="journey-tab" type="button" role="tab" aria-selected="false" aria-controls="journey-panel">출발지·도착지로 찾기</button>
+              </div>
+
+              <div id="station-panel" role="tabpanel" aria-labelledby="station-tab">
+                <form id="station-form" novalidate>
+                  <div class="station-primary-fields"><div class="field">
+                    <label for="bus-number">버스 번호 <span class="required">*</span></label>
+                    <div class="input-wrap"><span class="input-symbol bus-symbol" aria-hidden="true">▣</span><input id="bus-number" name="bus" list="bus-suggestions" autocomplete="off" placeholder="예: 6002" value="6002" required /></div>
+                    <datalist id="bus-suggestions"></datalist>
+                  </div>
+                  <div class="field">
+                    <label for="stop-name">정류장 이름 또는 번호 <span class="required">*</span></label>
+                    <div class="input-wrap"><svg class="input-symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg><input id="stop-name" name="stop" list="stop-suggestions" autocomplete="off" placeholder="정류장 이름이나 ARS 번호" value="광화문 · 01762" required /></div>
+                    <datalist id="stop-suggestions"></datalist>
+                    <p class="field-help">이름 또는 5자리 ARS 번호 하나만 입력하세요.</p>
+                  </div></div>
+                  <div class="station-secondary-fields"><fieldset class="direction-field">
+                    <legend>운행 방향 <span class="required">*</span></legend>
+                    <div class="direction-options" id="direction-options"></div>
+                  </fieldset>
+                  <div class="field date-field">
+                    <label for="travel-time">이용 예정 시간</label>
+                    <input id="travel-time" name="time" type="datetime-local" />
+                    <p class="field-help">3월 15일 서울마라톤과 11월 1일 JTBC 기록을 날짜·시간에 맞춰 조회합니다.</p>
+                  </div></div>
+                  <p id="form-error" class="form-error" role="alert" hidden></p>
+                  <button class="primary-button" type="submit">승차 가능 여부 확인</button>
+                </form>
+                <div class="sample-row"><span>기록 보기</span><button type="button" data-sample="affected">6002 무정차</button><button type="button" data-sample="normal">공지 목록 외</button><button type="button" data-sample="unknown">확인 필요</button></div>
+              </div>
+
+              <div id="journey-panel" role="tabpanel" aria-labelledby="journey-tab" hidden>
+                <form id="journey-form" novalidate>
+                  <div class="field place-field"><label for="origin">출발지 <span class="required">*</span></label><div class="input-wrap"><span class="point-symbol origin-symbol" aria-hidden="true"></span><input id="origin" autocomplete="off" placeholder="출발 정류장 또는 장소" required /></div><div class="place-choices" id="origin-choices" hidden></div></div>
+                  <div class="field place-field"><label for="destination">도착지 <span class="required">*</span></label><div class="input-wrap"><span class="point-symbol destination-symbol" aria-hidden="true"></span><input id="destination" autocomplete="off" placeholder="도착 정류장 또는 장소" required /></div><div class="place-choices" id="destination-choices" hidden></div></div>
+                  <div class="field date-field"><label for="journey-time">출발 예정 시간</label><input id="journey-time" type="datetime-local" /><p class="field-help">3월 15일·11월 1일 행사 자료 중 입력한 날짜의 기록을 대조합니다.</p></div>
+                  <p id="journey-error" class="form-error" role="alert" hidden></p>
+                  <button class="primary-button" type="submit">대체 승차 후보 찾기</button>
+                </form>
+                <p class="route-hint">검색 결과에서 출발지와 도착지를 선택하면 지도에 정확한 위치가 표시됩니다.</p>
+              </div>
+              <div class="result-panel" id="result-panel" aria-live="polite" aria-atomic="false"></div>
+            </div>
+
+            <div class="map-panel" aria-label="조회 정류소 위치 지도">
+              <div id="route-map" class="route-map" role="region" aria-label="서울 정류소 위치 참고 지도"></div>
+              <div class="map-bottom"><span id="map-caption">정류장을 조회하면 지도에 위치가 표시됩니다.</span><button id="map-reset" type="button">위치 다시 보기</button></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="live-section" id="live" aria-labelledby="live-title">
+          <div class="section-heading"><div><p class="section-kicker">LIVE BUS · SEOUL OPEN DATA</p><h2 id="live-title">지금 버스는 어디쯤 오고 있나요?</h2><p>현재 운행 중인 차량의 위치와 정류장 도착 예측을 직접 조회합니다.</p></div><span class="live-tag"><i></i>조회할 때 갱신</span></div>
+          <div class="live-grid"><form class="live-form" id="live-form"><div class="field"><label for="live-route">버스 번호</label><div class="input-wrap"><span class="input-symbol bus-symbol" aria-hidden="true">▣</span><input id="live-route" list="bus-suggestions" value="6002" required /></div></div><div class="field"><label for="live-stop">정류장 이름</label><div class="input-wrap"><svg class="input-symbol" viewBox="0 0 24 24" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="m16 16 4 4"/></svg><input id="live-stop" list="live-stop-suggestions" value="종각역.YMCA" placeholder="예: 종각역.YMCA" required /></div><datalist id="live-stop-suggestions"></datalist></div><button class="primary-button" type="submit">실시간 위치·도착 조회</button><p class="live-form-note">정류장 이름만 입력하세요. 같은 이름이 여러 곳이면 방향을 선택할 수 있습니다.</p></form><div class="live-result" id="live-result" aria-live="polite"><div class="live-empty"><span class="live-empty-icon">↗</span><strong>현재 버스를 조회해 보세요</strong><p>버스 번호와 정류장 이름으로 위치와 두 대의 도착 예측을 확인합니다.</p></div></div></div>
+        </section>
+
+        <section class="data-section" id="notice-catalog" aria-labelledby="data-title">
+          <div class="data-intro"><p class="section-kicker">NOTICE DATA · 2026.11.01</p><h2 id="data-title">공지 데이터</h2><p>JTBC 서울마라톤 버스 무정차 기록을 정류장별로 정리했습니다.</p></div>
+          <div class="data-stats"><div><strong>194<span>쪽</span></strong><small>원본 공지</small></div><div><strong>180<span>개</span></strong><small>노선</small></div><div><strong>2,729<span>건</span></strong><small>무정차 기록</small></div><div><strong>631<span>건</span></strong><small>추가 확인</small></div></div>
+          <details class="coverage-note"><summary>데이터 범위와 한계 보기</summary><p>10개 노선은 방향·정류장 순번을 추가 대조했습니다. 나머지 노선은 공지 조회에 사용합니다. 우회 도로와 최적 경로는 아직 검증되지 않았습니다.</p></details>
+        </section>
+
+        <details class="algorithm-section"><summary>경로 판단 기준 보기 <span>CITYFLOW v2 시험 구현 참고</span></summary><p>제공된 CITYFLOW HTML의 앞·뒤 정상 정류장 탐색과 최대 도보 1.5km 기준을 승차 후보 검색에 적용했습니다. 통제 여부는 입력한 정류장 이용 예정 시각으로 확인합니다. 전체 최단경로·예상 통과 시각별 재탐색은 아직 구현되지 않았으며, 표시된 승차 위치는 검토 후보입니다.</p></details>
+
+        <section class="how-section" id="how-it-works" aria-labelledby="how-title">
+          <div class="section-heading compact"><div><p class="section-kicker">HOW ROUTE B WORKS</p><h2 id="how-title">이렇게 확인하세요</h2></div></div>
+          <div class="steps">
+            <article class="step"><span class="step-number">01</span><h3>버스·정류장 입력</h3><p>이용 시간과 방향을 선택합니다.</p></article>
+            <article class="step"><span class="step-number">02</span><h3>무정차 여부 확인</h3><p>공지 근거와 확인 상태를 봅니다.</p></article>
+            <article class="step"><span class="step-number">03</span><h3>다음 승차 검토</h3><p>이동 후보와 현재 버스 정보를 확인합니다.</p></article>
+          </div>
+          <p class="how-caution" id="about">확실하지 않은 승차 후보는 확인이 필요하다고 표시합니다.</p>
+        </section>
+      </main>
+
+      <footer class="site-footer"><div><span class="footer-brand">Route B<span>.</span></span><p>길이 바뀌어도, 답은 있다.</p></div><p>이 페이지는 서비스 UI 시연용입니다. 실제 운행 판단에 사용하지 마세요.</p></footer>
+    </div>
+  </body>
+</html>
